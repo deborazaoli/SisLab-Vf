@@ -21,8 +21,18 @@ function gerarCodigoReserva() {
 
 router.get("/all", (req, res) => {
   const sql = `
-    SELECT * FROM reserva
-    ORDER BY reservaData, horaRetirada
+    SELECT
+      reserva.*,
+      recurso.nome AS nomeRecurso
+    FROM reserva
+    INNER JOIN recurso
+      ON reserva.idRecurso = recurso.idRecurso
+    WHERE
+      reserva.statusReserva = 'ativa'
+      AND reserva.reservaData >= CURDATE()
+    ORDER BY
+      reserva.reservaData,
+      reserva.horaRetirada
   `;
 
   db.query(sql, (err, result) => {
@@ -55,26 +65,62 @@ router.post("/", (req, res) => {
     idRecurso
   } = req.body;
 
-  if (!responsavelNome || !responsavelMatricula || !reservaData ||
-      !horaRetirada || !horaDevolucao || !idUsuario || !idRecurso) {
-    return res.status(400).json({ message: "Preencha todos os campos" });
+  if (
+    !responsavelNome ||
+    !responsavelMatricula ||
+    !reservaData ||
+    !horaRetirada ||
+    !horaDevolucao ||
+    !idUsuario ||
+    !idRecurso
+  ) {
+    return res.status(400).json({
+      message: "Preencha todos os campos."
+    });
+  }
+
+const hoje = new Date().toISOString().split("T")[0];
+
+  if (reservaData < hoje) {
+    return res.status(400).json({
+      message: "A reserva deve ser ser feita apenas para datas futuras."
+    });
+  }
+
+  if (horaDevolucao <= horaRetirada) {
+    return res.status(400).json({
+      message:
+        "O horário de devolução deve ser maior que o horário de retirada."
+    });
   }
 
   const sqlConflito = `
-    SELECT * FROM reserva
+    SELECT *
+    FROM reserva
     WHERE idRecurso = ?
       AND reservaData = ?
+      AND statusReserva <> 'cancelada'
       AND (? < horaDevolucao AND ? > horaRetirada)
   `;
 
   db.query(
     sqlConflito,
-    [idRecurso, reservaData, horaRetirada, horaDevolucao],
+    [
+      idRecurso,
+      reservaData,
+      horaRetirada,
+      horaDevolucao
+    ],
     (err, conflito) => {
-      if (err) return res.status(500).json(err);
+      if (err) {
+        return res.status(500).json(err);
+      }
 
       if (conflito.length > 0) {
-        return res.status(409).json({ message: "Conflito de horário" });
+        return res.status(409).json({
+          message:
+            "Já existe uma reserva para este recurso nesse horário."
+        });
       }
 
       const codigoReserva = gerarCodigoReserva();
@@ -107,10 +153,12 @@ router.post("/", (req, res) => {
           idRecurso
         ],
         (err, result) => {
-          if (err) return res.status(500).json(err);
+          if (err) {
+            return res.status(500).json(err);
+          }
 
-          res.json({
-            message: "Reserva criada",
+          res.status(201).json({
+            message: "Reserva criada com sucesso.",
             idReserva: result.insertId,
             codigoReserva
           });
@@ -119,8 +167,6 @@ router.post("/", (req, res) => {
     }
   );
 });
-
-
 
 router.put("/cancelar/:id", (req, res) => {
   const sql = `
