@@ -1,127 +1,264 @@
-const express = require("express");
-const router = express.Router();
-const db = require("../db");
+import React, { useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  Image,
+} from "react-native";
 
-router.get("/tipos", (req, res) => {
-  db.query("SELECT DISTINCT tipoRecurso FROM recurso", (err, r) => {
-    if (err) return res.status(500).json(err);
-    res.json(r);
-  });
-});
+import { useFocusEffect } from "@react-navigation/native";
 
-router.get("/", (req, res) => {
-  const { tipo } = req.query;
+const API_URL = "http://localhost:3000";
 
-  let sql = "SELECT * FROM recurso";
-  const params = [];
+export default function CalendarioScreen({ navigation }) {
+  const [reservas, setReservas] = useState([]);
+  const [carregando, setCarregando] = useState(true);
 
-  if (tipo) {
-    sql += " WHERE tipoRecurso = ?";
-    params.push(tipo);
-  }
+  async function carregarReservas() {
+    try {
+      setCarregando(true);
 
-  db.query(sql, params, (err, result) => {
-    if (err) {
-      console.log(err);
-      return res.status(500).json(err);
-    }
+      const resposta = await fetch(`${API_URL}/reservas/all`);
 
-    res.json(result);
-  });
-});
-
-router.post("/", (req, res) => {
-  const {
-    nome,
-    tipoRecurso,
-    capacidadePessoas,
-    localizacao,
-    observacao,
-    codigoSeguranca,
-    codigoValidade
-  } = req.body;
-
-  const idRecurso = "R" + Date.now().toString().slice(-6);
-
-  const sql = `
-    INSERT INTO recurso
-    (idRecurso, nome, tipoRecurso, capacidadePessoas, localizacao, observacao, codigoSeguranca, codigoValidade, statusRecurso)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'disponivel')
-  `;
-
-  db.query(
-    sql,
-    [
-      idRecurso,
-      nome,
-      tipoRecurso,
-      capacidadePessoas || null,
-      localizacao,
-      observacao,
-      codigoSeguranca || null,
-      codigoValidade || null
-    ],
-    (err) => {
-      if (err) {
-        console.log("ERRO SQL COMPLETO:", err);
-        return res.status(500).json(err);
+      if (!resposta.ok) {
+        throw new Error("Não foi possível carregar as reservas.");
       }
 
-      res.json({ ok: true });
+      const dados = await resposta.json();
+
+      setReservas(dados);
+    } catch (erro) {
+      console.log("Erro ao carregar reservas:", erro);
+
+      Alert.alert(
+        "Erro",
+        "Não foi possível carregar as reservas."
+      );
+    } finally {
+      setCarregando(false);
     }
+  }
+
+  // Recarrega sempre que entrar na tela
+  useFocusEffect(
+    useCallback(() => {
+      carregarReservas();
+    }, [])
   );
-});
 
-router.delete("/:id", (req, res) => {
-  db.query(
-    "DELETE FROM recurso WHERE idRecurso = ?",
-    [req.params.id],
-    (err) => {
-      if (err) return res.status(500).json(err);
-      res.json({ ok: true });
-    }
+  function formatarData(data) {
+    if (!data) return "";
+
+    const partes = data.split("T")[0].split("-");
+
+    if (partes.length !== 3) return data;
+
+    return `${partes[2]}/${partes[1]}/${partes[0]}`;
+  }
+
+  function formatarHora(hora) {
+    if (!hora) return "";
+
+    return hora.substring(0, 5);
+  }
+
+  return (
+    <View style={styles.container}>
+
+      {/* HEADER */}
+      <View style={styles.header}>
+
+        {/* BOTÃO VOLTAR */}
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={styles.voltar}
+        >
+          <Image
+            source={require("../assets/seta.png")}
+            style={styles.icon}
+          />
+        </Pressable>
+
+        {/* TÍTULO */}
+        <Text style={styles.tituloHeader}>
+          Calendário de Reservas
+        </Text>
+
+        {/* ESPAÇO PARA CENTRALIZAR O TÍTULO */}
+        <View style={styles.espaco} />
+
+      </View>
+
+      {/* CONTEÚDO */}
+      <View style={styles.content}>
+
+        {carregando ? (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" />
+            <Text style={styles.loadingText}>
+              Carregando reservas...
+            </Text>
+          </View>
+
+        ) : reservas.length === 0 ? (
+
+          <Text style={styles.vazio}>
+            Não existem reservas futuras.
+          </Text>
+
+        ) : (
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.lista}
+          >
+
+            {reservas.map((reserva) => (
+
+              <View
+                key={reserva.idReserva}
+                style={styles.reserva}
+              >
+
+                <Text style={styles.data}>
+                  {formatarData(reserva.reservaData)}
+                </Text>
+
+                <Text style={styles.recurso}>
+                  {reserva.nomeRecurso}
+                </Text>
+
+                <Text style={styles.horario}>
+                  {formatarHora(reserva.horaRetirada)}
+                  {" - "}
+                  {formatarHora(reserva.horaDevolucao)}
+                </Text>
+
+                <Text style={styles.responsavel}>
+                  Responsável: {reserva.responsavelNome}
+                </Text>
+
+              </View>
+
+            ))}
+
+          </ScrollView>
+
+        )}
+
+      </View>
+
+    </View>
   );
+}
+
+const styles = StyleSheet.create({
+
+  /* TELA */
+  container: {
+    flex: 1,
+    backgroundColor: "#CCFCE4",
+  },
+
+  /* HEADER */
+  header: {
+    height: 75,
+    backgroundColor: "#FFF",
+
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+
+    paddingHorizontal: 20,
+  },
+
+  voltar: {
+    width: 28,
+    height: 28,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  icon: {
+    width: 28,
+    height: 28,
+    resizeMode: "contain",
+  },
+
+  tituloHeader: {
+    fontSize: 26,
+    fontWeight: "bold",
+  },
+
+  espaco: {
+    width: 28,
+  },
+
+  /* CONTEÚDO */
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 15,
+  },
+
+  lista: {
+    paddingBottom: 20,
+  },
+
+  /* CARREGAMENTO */
+  loading: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  loadingText: {
+    marginTop: 10,
+    fontSize: 15,
+  },
+
+  /* QUANDO NÃO HÁ RESERVAS */
+  vazio: {
+    fontSize: 16,
+    textAlign: "center",
+    marginTop: 30,
+  },
+
+  /* CARD DA RESERVA */
+  reserva: {
+    backgroundColor: "#FFF",
+
+    padding: 16,
+
+    borderRadius: 4,
+
+    marginBottom: 10,
+  },
+
+  data: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 5,
+  },
+
+  recurso: {
+    fontSize: 17,
+    fontWeight: "600",
+    marginBottom: 5,
+  },
+
+  horario: {
+    fontSize: 15,
+    marginBottom: 5,
+  },
+
+  responsavel: {
+    fontSize: 14,
+    color: "#666",
+  },
+
 });
-
-router.put("/:id", (req, res) => {
-  const {
-    nome,
-    capacidadePessoas,
-    localizacao,
-    observacao,
-    codigoSeguranca,
-    codigoValidade
-  } = req.body;
-
-  const sql = `
-    UPDATE recurso
-    SET
-      nome = ?,
-      capacidadePessoas = ?,
-      localizacao = ?,
-      observacao = ?,
-      codigoSeguranca = ?,
-      codigoValidade = ?
-    WHERE idRecurso = ?
-  `;
-
-  db.query(
-    sql,
-    [
-      nome,
-      capacidadePessoas,
-      localizacao,
-      observacao,
-      codigoSeguranca,
-      codigoValidade,
-      req.params.id
-    ],
-    (err) => {
-      if (err) return res.status(500).json(err);
-
-      res.json({ message: "Recurso atualizado" });
-    }
-  );
-});
-
-module.exports = router;
